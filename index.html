@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Simulador MLFQ · Planificación con colas multinivel</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f3f1ec; --card:#fff; --soft:#f7f5f0; --border:#e4e0d6; --text:#1c2431; --muted:#6b7280;
+  --accent:#1f4fd8; --accent-soft:#e8eefc; --ok:#0f8a5f; --warn-bg:#fff4e0; --warn-bd:#f0b04a; --warn-tx:#7a4a00;
+  --q0:#1f4fd8; --q1:#d98a00; --q2:#7c3aed; --shadow:0 1px 2px rgba(28,36,49,.06),0 6px 18px rgba(28,36,49,.05);
+  --wait-a:#d9d5c9; --wait-b:#efece4; --future:#fff; --cell:#f7f5f0; --hd1:#14224a; --hd2:#1f4fd8;
+}
+[data-theme=dark]{
+  --bg:#0f141c; --card:#171e2a; --soft:#1d2635; --border:#2a3547; --text:#e6ebf4; --muted:#93a0b5;
+  --accent:#6b93ff; --accent-soft:#1c2a4d; --ok:#34d399; --warn-bg:#3a2a0c; --warn-bd:#b7791f; --warn-tx:#fde2a6;
+  --q0:#6b93ff; --q1:#f5b041; --q2:#a78bfa; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3);
+  --wait-a:#33405a; --wait-b:#212b3c; --future:#171e2a; --cell:#1d2635; --hd1:#0b1020; --hd2:#1e3a8a;
+}
+body{font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;background:var(--bg);color:var(--text);transition:background .25s,color .25s}
+header{background:linear-gradient(120deg,var(--hd1),var(--hd2));color:#fff;padding:20px 26px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header .tt{flex:1;min-width:240px}
+header h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+header p{font-size:13px;opacity:.8;margin-top:4px}
+.theme{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:999px;padding:7px 14px;font-size:12.5px;cursor:pointer;font-weight:600}
+.theme:hover{background:rgba(255,255,255,.2)}
+.layout{display:grid;grid-template-columns:310px minmax(0,1fr);gap:16px;max-width:1400px;margin:0 auto;padding:16px}
+@media(max-width:1020px){.layout{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);transition:background .25s,border-color .25s}
+.card h2{font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card h2 .num{background:var(--accent);color:var(--card);font-size:11px;border-radius:7px;padding:2px 8px;font-weight:700}
+aside,.main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.muted{color:var(--muted)} .tiny{font-size:11px}
+
+.status-row{display:grid;grid-template-columns:minmax(170px,1fr) minmax(300px,1.8fr) minmax(170px,1.15fr);gap:16px;align-items:stretch}
+@media(max-width:940px){.status-row{grid-template-columns:1fr 1fr}.status-row .card:last-child{grid-column:1/-1}}
+@media(max-width:620px){.status-row{grid-template-columns:1fr}}
+.status-row .card{padding:14px 16px}
+
+.btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:9px;padding:8px 13px;font-size:13px;cursor:pointer;font-weight:600;transition:all .15s}
+.btn:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--card)}
+.btn.active{background:var(--text);border-color:var(--text);color:var(--card)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.sm{padding:7px 11px;font-size:12px}
+.btn:focus-visible,.in:focus-visible,.theme:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.in{border:1px solid var(--border);background:var(--soft);color:var(--text);border-radius:9px;padding:7px 9px;font-size:13px;width:100%}
+.in.tiny{width:40px;padding:1px 3px;font-size:11.5px;text-align:center;border-radius:6px}
+.form-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--muted);font-weight:700}
+.fld .in{width:82px}
+.msg{font-size:12px;color:var(--ok);min-height:16px;margin:5px 0 8px}
+.msg.err{color:#dc2626}
+
+.pitem{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);background:var(--soft);border-radius:10px;margin-bottom:6px;font-size:12.5px}
+.pitem .del{margin-left:auto;border:none;background:transparent;color:#dc2626;border-radius:6px;width:22px;height:22px;cursor:pointer;font-weight:700}
+.pitem .del:hover{background:rgba(220,38,38,.14)}
+.dot{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+
+.cpu-line{font-size:14px;margin-bottom:2px}
+.cpu-line b{font-size:20px}
+.resta{color:var(--muted);font-weight:600}
+.cpu-sub{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+
+.qline{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.qlabel{font-size:12px;font-weight:700;display:flex;align-items:center;gap:4px;flex:none;min-width:122px;padding-left:8px;border-left:4px solid var(--c)}
+.qchips{flex:1;min-height:30px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;border:1px dashed var(--border);border-radius:9px;padding:3px 7px;background:var(--soft)}
+.chip{display:inline-flex;align-items:center;gap:4px;color:#fff;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 10px;animation:pop .25s ease}
+.chip .tiny{font-weight:400;opacity:.85;font-size:10px}
+.chip.fin{background:var(--ok);color:#fff}
+@keyframes pop{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+.qnote{font-size:10.5px;color:var(--muted);margin-top:8px}
+#finList{display:flex;flex-wrap:nowrap;gap:6px;min-height:62px;align-items:stretch;overflow-x:auto;padding-bottom:8px;scroll-behavior:smooth}
+.fitem{flex:none;border:1px solid var(--border);border-top:4px solid var(--c);border-radius:9px;background:var(--soft);padding:5px 12px;display:flex;flex-direction:column;align-items:center;font-size:11px;line-height:1.4;color:var(--muted);animation:pop .25s ease}
+.fitem b{font-size:14px;color:var(--c)}
+.farrow{flex:none;align-self:center;color:var(--muted);font-weight:700}
+.fcount{font-weight:400;font-size:11.5px;color:var(--muted)}
+.chip.pre{box-shadow:0 0 0 2px var(--warn-bd),0 0 12px rgba(245,158,11,.6);animation:pulse 1s ease 2}
+.pre-tag{font-size:10px;font-weight:700;background:var(--warn-bg);color:var(--warn-tx);border:1px solid var(--warn-bd);border-radius:999px;padding:0 7px;margin-left:2px}
+@keyframes pulse{50%{transform:scale(1.08)}}
+.qalert{display:none;margin-top:9px;font-size:12px;line-height:1.45;background:var(--warn-bg);color:var(--warn-tx);border:1px solid var(--warn-bd);border-left-width:5px;border-radius:9px;padding:7px 10px}
+.qalert.show{display:block}
+
+.ctrl-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.spacer{flex:1}
+.badge{background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12px;border-radius:999px;padding:5px 12px;white-space:nowrap}
+.badge.gray{background:var(--soft);color:var(--muted)}
+
+/* aviso de expropiación */
+.banner{display:none;border:1px solid var(--warn-bd);background:var(--warn-bg);color:var(--warn-tx);border-radius:12px;padding:12px 16px;font-size:13.5px;line-height:1.5;border-left-width:6px}
+.banner.show{display:block}
+.banner.live{animation:shake .5s ease}
+.banner:not(.live){opacity:.7;font-size:12.5px;padding:9px 14px}
+@keyframes shake{0%{transform:translateX(-8px);opacity:0}40%{transform:translateX(5px)}70%{transform:translateX(-2px)}100%{transform:none;opacity:1}}
+
+.legend{font-weight:400;font-size:11.5px;color:var(--muted);margin-left:6px}
+.gwrap{overflow-x:auto;padding-top:4px}
+.ghead,.grow{display:grid;gap:4px;align-items:center;margin-bottom:4px}
+.ghead{margin-bottom:20px}
+.gnum{font-size:11.5px;color:var(--muted);text-align:center;font-weight:600;position:relative}
+.gnum.now{color:var(--accent);font-weight:700}
+.gnum.pre{color:#dc2626;font-weight:700}
+.gnum.pre::after{content:'⚡';position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:11px}
+.glabel{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.glabel .dot{width:12px;height:12px}
+.gcell{height:30px;border-radius:6px;position:relative;background:var(--cell);border:1px solid var(--border)}
+.gcell.future{background:var(--future);border:1px dashed var(--border)}
+.gcell.wait{background:repeating-linear-gradient(45deg,var(--wait-a) 0 3px,var(--wait-b) 3px 7px)}
+.gcell.run{border:1px solid rgba(0,0,0,.25);box-shadow:inset 0 -3px 0 rgba(0,0,0,.18)}
+.gcell.fin{border-right:4px solid var(--text)}
+.gcell.arrival::before{content:'▼';position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--muted)}
+
+.stable-wrap{max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+.stable,.rtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.stable th,.rtable th{position:sticky;top:0;background:var(--soft);color:var(--muted);font-size:11px;padding:8px;border-bottom:1px solid var(--border);z-index:1}
+.stable td,.rtable td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;font-variant-numeric:tabular-nums}
+.stable tr.now td{background:var(--accent-soft);font-weight:700;color:var(--accent)}
+.stable tr.pre td{box-shadow:inset 0 0 0 9999px rgba(245,158,11,.14)}
+.stable tr.pre td:first-child{border-left:4px solid var(--q1)}
+.rtable td{padding:8px 10px}
+.rtable tfoot td{font-weight:700;background:var(--soft);border-top:2px solid var(--border)}
+
+.rules summary{cursor:pointer;font-weight:700;font-size:13.5px}
+.rules ul{margin:10px 0 0 18px;font-size:12.5px;color:var(--muted);display:grid;gap:5px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tt">
+    <h1>Simulador de planificación MLFQ</h1>
+    <p>Colas multinivel con retroalimentación — Q0: RR (q=2) → Q1: RR (q=4) → Q2: FCFS · ejecución paso a paso</p>
+  </div>
+  <button id="btnTheme" class="theme">🌙 Modo oscuro</button>
+</header>
+
+<div class="layout">
+  <aside>
+    <section class="card">
+      <h2><span class="num">1</span>Procesos</h2>
+      <div class="form-row">
+        <label class="fld">Llegada<input id="inArr" class="in" type="number" min="0" value="0"></label>
+        <label class="fld">Ráfaga<input id="inBur" class="in" type="number" min="1" value="5"></label>
+        <button id="btnAdd" class="btn primary sm">+ Agregar</button>
+      </div>
+      <div id="msg" class="msg"></div>
+      <div id="plist"></div>
+    </section>
+
+    <details class="card rules">
+      <summary>Reglas de la simulación</summary>
+      <ul>
+        <li>Los procesos nuevos entran a <b>Q0</b> (Round‑Robin).</li>
+        <li>Si agota su quantum en Q0 baja a <b>Q1</b>; si lo agota en Q1 baja a <b>Q2</b> (FCFS: ejecuta hasta terminar).</li>
+        <li>Q0 tiene prioridad sobre Q1, y Q1 sobre Q2: si llega un proceso a una cola de mayor prioridad, el CPU se expropia y el proceso actual regresa al <b>frente</b> de su cola.</li>
+        <li>No hay expropiación entre procesos del mismo nivel: el proceso conserva el CPU hasta agotar su quantum.</li>
+        <li>Al ser despachado, un proceso recibe un quantum completo.</li>
+      </ul>
+    </details>
+  </aside>
+
+  <div class="main">
+    <section class="card">
+      <div class="ctrl-row">
+        <button id="btnBack" class="btn">⏮ Atrás</button>
+        <button id="btnStep" class="btn primary">▶ Paso</button>
+        <button id="btnAuto" class="btn">▶▶ Auto</button>
+        <button id="btnAll" class="btn">⏭ Todo</button>
+        <button id="btnReset" class="btn">↺ Reiniciar</button>
+        <select id="speed" class="btn">
+          <option value="1300">🐢 Lento</option>
+          <option value="700" selected>⏱ Normal</option>
+          <option value="280">🐇 Rápido</option>
+        </select>
+        <span class="spacer"></span>
+        <span class="badge" id="tBadge">t = 0</span>
+        <span class="badge gray" id="progBadge">0/0</span>
+        <span class="badge gray" id="statusBadge">En espera</span>
+      </div>
+      <div class="tiny muted" style="margin-top:8px">Atajos: → o espacio = paso · ← = atrás</div>
+    </section>
+
+    <div id="banner" class="banner" role="status" aria-live="polite"></div>
+
+    <section class="card">
+      <h2><span class="num">2</span>Gantt por proceso
+        <span class="legend">↓ llegada · rayado = espera · color = ejecución · │ fin · ⚡ expropiación</span></h2>
+      <div id="gantt" class="gwrap"></div>
+    </section>
+
+    <div class="status-row">
+      <section class="card">
+        <h2><span class="num">3</span>Estado del CPU</h2>
+        <div id="cpuLine" class="cpu-line"></div>
+        <div id="cpuSub" class="cpu-sub"></div>
+        <div id="cpuFin" class="cpu-sub"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">4</span>Colas de listos</h2>
+        <div class="qline">
+          <div class="qlabel" style="--c:var(--q0)">Q0 — RR (q=<input id="q0in" class="in tiny" type="number" min="1" value="2">)</div>
+          <div id="q0chips" class="qchips"></div>
+        </div>
+        <div class="qline">
+          <div class="qlabel" style="--c:var(--q1)">Q1 — RR (q=<input id="q1in" class="in tiny" type="number" min="1" value="4">)</div>
+          <div id="q1chips" class="qchips"></div>
+        </div>
+        <div class="qline">
+          <div class="qlabel" style="--c:var(--q2)">Q2 — FCFS</div>
+          <div id="q2chips" class="qchips"></div>
+        </div>
+        <div class="qnote">Entre paréntesis: ráfaga restante.</div>
+        <div id="qAlert" class="qalert" role="status"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">5</span>Terminados <span class="fcount" id="finCount"></span></h2>
+        <div id="finList"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2><span class="num">6</span>Resumen de estados del sistema <span class="legend">fila naranja = hubo expropiación</span></h2>
+      <div id="statesWrap" class="stable-wrap">
+        <table class="stable">
+          <thead><tr><th>t</th><th>CPU</th><th>Q0</th><th>Q1</th><th>Q2</th><th>Terminados</th><th>Evento</th></tr></thead>
+          <tbody id="statesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">7</span>Resultados</h2>
+      <table class="rtable">
+        <thead><tr><th>P</th><th>Llegada</th><th>Ráfaga</th><th>Fin</th><th>Retorno</th><th>Espera</th></tr></thead>
+        <tbody id="resBody"></tbody>
+        <tfoot><tr><td colspan="4" style="text-align:right">Promedios</td><td id="retAvg">—</td><td id="espAvg">—</td></tr></tfoot>
+      </table>
+      <div class="tiny muted" style="margin-top:8px">Retorno = Fin − Llegada · Espera = Retorno − Ráfaga</div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const PALETTE = ['#2563eb','#059669','#d97706','#dc2626','#0891b2','#db2777','#92400e','#65a30d','#475569','#9f1239'];
+const clone = o => JSON.parse(JSON.stringify(o));
+
+let processes = [
+  {name:'P1', arrival:0, burst:6},
+  {name:'P2', arrival:1, burst:3},
+  {name:'P3', arrival:2, burst:10},
+  {name:'P4', arrival:5, burst:2},
+  {name:'P5', arrival:9, burst:3},
+];
+let q0v = 2, q1v = 4;
+let sim = null, history = [], timer = null, lastBanner = '';
+
+function renumber(){
+  processes.forEach((p, i) => { p.name = 'P' + (i + 1); p.color = PALETTE[i % PALETTE.length]; });
+}
+const quantumOf = l => l === 0 ? q0v : l === 1 ? q1v : Infinity;
+
+// ====== motor MLFQ ======
+function arrivals(){
+  sim.procs.forEach((p, i) => {
+    if (p.arrival === sim.t){ p.level = 0; p.quantumUsed = 0; sim.queues[0].push(i); }
+  });
+}
+function preemptIfNeeded(){
+  if (sim.cpu === null) return;
+  for (let l = 0; l < sim.cpuLevel; l++){
+    if (sim.queues[l].length){
+      const v = sim.procs[sim.cpu];
+      // Se registra el evento de expropiación para mostrarlo en el aviso
+      sim.events.push({
+        t: sim.t,
+        by: sim.procs.filter(p => p.arrival === sim.t).map(p => p.name),
+        victim: v.name, level: sim.cpuLevel, remaining: v.remaining
+      });
+      sim.queues[sim.cpuLevel].unshift(sim.cpu);
+      sim.cpu = null;
+      return;
+    }
+  }
+}
+function dispatch(){
+  if (sim.cpu !== null) return;
+  for (let l = 0; l < 3; l++){
+    if (sim.queues[l].length){
+      sim.cpu = sim.queues[l].shift();
+      sim.cpuLevel = l;
+      sim.procs[sim.cpu].quantumUsed = 0;
+      return;
+    }
+  }
+}
+function bookkeep(){ arrivals(); preemptIfNeeded(); dispatch(); }
+
+function step(){
+  if (sim.done) return;
+  const t = sim.t;
+  sim.states.push({
+    t,
+    cpu: sim.cpu !== null ? sim.procs[sim.cpu].name : '—',
+    q: [0,1,2].map(l => sim.queues[l].map(i => sim.procs[i].name)),
+    fin: sim.finished.map(i => sim.procs[i].name),
+    pre: sim.events.some(e => e.t === t)
+  });
+  sim.procs.forEach((p, i) => {
+    if (i === sim.cpu) sim.gantt[i][t] = 'run';
+    else if (p.arrival <= t && p.completion === null) sim.gantt[i][t] = 'wait';
+  });
+  if (sim.cpu !== null){
+    const p = sim.procs[sim.cpu], idx = sim.cpu;
+    p.remaining--; p.quantumUsed++;
+    if (p.remaining === 0){
+      p.completion = t + 1;
+      sim.finished.push(idx);
+      sim.cpu = null;
+    } else if (sim.cpuLevel < 2 && p.quantumUsed >= quantumOf(sim.cpuLevel)){
+      p.level = sim.cpuLevel + 1;
+      sim.queues[sim.cpuLevel + 1].push(idx);
+      sim.cpu = null;
+    }
+  }
+  sim.t++;
+  bookkeep();
+  if (sim.procs.length && sim.procs.every(p => p.completion !== null)) sim.done = true;
+}
+
+function initSim(){
+  setAuto(false);
+  sim = {
+    t: 0,
+    procs: processes.map(p => ({...p, remaining: p.burst, level: 0, quantumUsed: 0, completion: null})),
+    queues: [[],[],[]],
+    cpu: null, cpuLevel: 0,
+    finished: [], events: [],
+    gantt: processes.map(() => []),
+    states: [], done: false
+  };
+  history = []; lastBanner = '';
+  bookkeep();
+  renderAll();
+}
+
+function stepForward(){
+  if (!sim || sim.done) return;
+  history.push(clone(sim)); step(); renderAll();
+}
+function stepBack(){
+  setAuto(false);
+  if (!history.length) return;
+  sim = history.pop(); lastBanner = ''; renderAll();
+}
+function runAll(){
+  setAuto(false);
+  let guard = 0;
+  while (!sim.done && guard++ < 100000){ history.push(clone(sim)); step(); }
+  renderAll();
+}
+function setAuto(on){
+  clearInterval(timer); timer = null;
+  if (on){
+    if (!sim || sim.done){ renderBadges(); return; }
+    timer = setInterval(() => { if (sim.done){ setAuto(false); renderAll(); } else stepForward(); }, +$('#speed').value);
+  }
+  $('#btnAuto').textContent = on ? '⏸ Pausar' : '▶▶ Auto';
+  $('#btnAuto').classList.toggle('active', on);
+}
+
+// ====== render ======
+function renderAll(){
+  renderProcessList(); renderCPU(); renderQueues(); renderFinished(); renderBanner();
+  renderGantt(); renderStates(); renderResults(); renderBadges();
+}
+
+function evText(e){
+  const quien = e.by.length > 1 ? e.by.join(' y ') + ' llegaron' : e.by.join('') + ' llegó';
+  const quienes = e.by.length > 1 ? 'desplazan' : 'desplaza';
+  return `<b>Expropiación en t = ${e.t}:</b> ${quien} a Q0 y ${quienes} a <b>${e.victim}</b> `
+    + `(estaba en Q${e.level}, le quedaban ${e.remaining}). ${e.victim} regresa al frente de Q${e.level}.`;
+}
+function renderBanner(){
+  const b = $('#banner');
+  const last = sim.events[sim.events.length - 1];
+  if (!last){ b.className = 'banner'; b.innerHTML = ''; return; }
+  const live = last.t === sim.t;
+  const html = (live ? '⚡ ' : '⚡ Última expropiación — ') + evText(last);
+  b.innerHTML = html;
+  b.className = 'banner show' + (live && html !== lastBanner ? ' live' : '');
+  lastBanner = html;
+}
+
+function renderProcessList(){
+  $('#plist').innerHTML = processes.map((p, i) => `
+    <div class="pitem">
+      <span class="dot" style="background:${p.color}"></span>
+      <b>${p.name}</b>
+      <span class="muted">llegada ${p.arrival} · ráfaga ${p.burst}</span>
+      <button class="del" data-i="${i}" title="Eliminar">✕</button>
+    </div>`).join('')
+    || '<div class="muted tiny" style="padding:6px 0">No hay procesos. Agrega uno arriba.</div>';
+  $('#plist').querySelectorAll('.del').forEach(b => b.onclick = () => {
+    const removed = processes[+b.dataset.i].name;
+    processes.splice(+b.dataset.i, 1);
+    renumber();
+    showMsg(`Proceso ${removed} eliminado${processes.length ? ' — resto renumerado' : ''}.`);
+    initSim();
+  });
+}
+
+function renderCPU(){
+  const line = $('#cpuLine'), sub = $('#cpuSub');
+  if (sim.cpu !== null){
+    const p = sim.procs[sim.cpu], q = quantumOf(sim.cpuLevel);
+    line.innerHTML = `CPU: <b style="color:${p.color}">${p.name}</b> <span class="resta">(resta ${p.remaining})</span>`;
+    sub.textContent = `Nivel: Q${sim.cpuLevel} — ${sim.cpuLevel === 2 ? 'FCFS' : 'RR (q=' + q + ')'} · quantum ${p.quantumUsed}/${q === Infinity ? '∞' : q}`;
+  } else {
+    line.innerHTML = 'CPU: <span class="muted">— inactivo —</span>';
+    sub.textContent = sim.done ? 'Todos los procesos han terminado ✔' : 'sin proceso despachado';
+  }
+  $('#cpuFin').innerHTML = 'Terminados: ' + (sim.finished.length
+    ? sim.finished.map(i => { const p = sim.procs[i]; return `<b style="color:${p.color}">${p.name}</b>`; }).join(', ')
+    : '<span class="muted">(ninguno)</span>');
+}
+
+function renderQueues(){
+  const ev = sim.events[sim.events.length - 1];
+  const live = !!ev && ev.t === sim.t;
+  const vIdx = live ? sim.procs.findIndex(p => p.name === ev.victim) : -1;
+  for (let l = 0; l < 3; l++){
+    $('#q' + l + 'chips').innerHTML = sim.queues[l].length
+      ? sim.queues[l].map(i => { const p = sim.procs[i], hit = i === vIdx;
+          return `<span class="chip${hit ? ' pre' : ''}" style="background:${p.color}">${p.name}<span class="tiny">(${p.remaining})</span>${hit ? '<span class="pre-tag">⚡ expropiado</span>' : ''}</span>`; }).join('')
+      : '<span class="muted tiny">(vacía)</span>';
+  }
+  const al = $('#qAlert');
+  al.className = 'qalert' + (live ? ' show' : '');
+  al.innerHTML = live
+    ? `⚡ <b>Expropiación:</b> ${ev.by.join(' y ')} (Q0) ${ev.by.length > 1 ? 'expropian' : 'expropia'} a <b>${ev.victim}</b>, que regresa al <b>frente de Q${ev.level}</b> con ${ev.remaining} restante${ev.remaining === 1 ? '' : 's'}.`
+    : '';
+}
+
+function renderFinished(){
+  const box = $('#finList');
+  $('#finCount').textContent = `${sim.finished.length}/${sim.procs.length}`;
+  box.innerHTML = sim.finished.length
+    ? sim.finished.map(i => { const p = sim.procs[i];
+        return `<div class="fitem" style="--c:${p.color}" title="${p.name}: llegada ${p.arrival}, ráfaga ${p.burst}"><b>${p.name} ✓</b><span>fin ${p.completion}</span><span>retorno ${p.completion - p.arrival}</span></div>`; }).join('<span class="farrow">›</span>')
+    : '<span class="muted">(ninguno todavía)</span>';
+  box.scrollLeft = box.scrollWidth;   // sigue al último proceso terminado
+}
+
+function renderGantt(){
+  const maxArr = processes.length ? Math.max(...processes.map(p => p.arrival)) : 0;
+  const T = Math.max(sim.t, 12, maxArr + 1);
+  const preT = new Set(sim.events.map(e => e.t));
+  const cols = `grid-template-columns:110px repeat(${T},28px)`;
+  let html = `<div class="ghead" style="${cols}"><div class="glabel muted tiny">t</div>`;
+  for (let c = 0; c < T; c++)
+    html += `<div class="gnum${c === sim.t ? ' now' : ''}${preT.has(c) ? ' pre' : ''}">${c}</div>`;
+  html += '</div>';
+  sim.procs.forEach((p, i) => {
+    html += `<div class="grow" style="${cols}">`;
+    html += `<div class="glabel" title="llegada ${p.arrival} · ráfaga ${p.burst}"><span class="dot" style="background:${p.color}"></span>${p.name}</div>`;
+    for (let c = 0; c < T; c++){
+      const st = sim.gantt[i][c];
+      let cls = 'gcell';
+      if (st === 'run') cls += ' run';
+      else if (st === 'wait') cls += ' wait';
+      else cls += c >= sim.t ? ' future' : '';
+      if (c === p.arrival) cls += ' arrival';
+      if (p.completion !== null && c === p.completion - 1) cls += ' fin';
+      html += `<div class="${cls}"${st === 'run' ? ` style="background:${p.color}"` : ''}></div>`;
+    }
+    html += '</div>';
+  });
+  $('#gantt').innerHTML = html;
+}
+
+function renderStates(){
+  const tb = $('#statesBody');
+  tb.innerHTML = sim.states.map((s, k) => {
+    const ev = s.pre ? sim.events.find(e => e.t === s.t) : null;
+    const cls = (k === sim.states.length - 1 ? 'now ' : '') + (s.pre ? 'pre' : '');
+    return `<tr class="${cls}">
+      <td>${s.t}</td><td>${s.cpu}</td>
+      ${s.q.map(q => `<td>${q.length ? q.join(', ') : '—'}</td>`).join('')}
+      <td>${s.fin.length ? s.fin.join(', ') : '—'}</td>
+      <td>${ev ? `⚡ ${ev.by.join(', ')} expropia a ${ev.victim}` : ''}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted" style="padding:12px">Presiona “Paso” para iniciar la simulación…</td></tr>';
+  const w = $('#statesWrap'); w.scrollTop = w.scrollHeight;
+}
+
+function renderResults(){
+  let retSum = 0, espSum = 0, n = 0;
+  $('#resBody').innerHTML = sim.procs.map(p => {
+    let fin = '—', ret = '—', esp = '—';
+    if (p.completion !== null){
+      fin = p.completion; ret = fin - p.arrival; esp = ret - p.burst;
+      retSum += ret; espSum += esp; n++;
+    }
+    return `<tr><td><span class="dot" style="background:${p.color};margin-right:4px"></span>${p.name}</td>
+      <td>${p.arrival}</td><td>${p.burst}</td><td>${fin}</td><td>${ret}</td><td>${esp}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">—</td></tr>';
+  $('#retAvg').textContent = n ? (retSum / n).toFixed(2) : '—';
+  $('#espAvg').textContent = n ? (espSum / n).toFixed(2) : '—';
+}
+
+function renderBadges(){
+  $('#tBadge').textContent = 't = ' + sim.t;
+  $('#progBadge').textContent = `${sim.finished.length}/${sim.procs.length}${sim.done ? ' ✓' : ''}`;
+  $('#statusBadge').textContent = sim.done ? 'Terminado ✔' : (sim.t === 0 ? 'En espera' : 'Ejecutando');
+  $('#btnStep').disabled = sim.done || !processes.length;
+  $('#btnAll').disabled = sim.done || !processes.length;
+  $('#btnAuto').disabled = sim.done || !processes.length;
+  $('#btnBack').disabled = !history.length;
+}
+
+// ====== eventos ======
+let msgTimer = null;
+function showMsg(txt, err = false){
+  const m = $('#msg'); m.textContent = txt; m.className = 'msg' + (err ? ' err' : '');
+  clearTimeout(msgTimer); msgTimer = setTimeout(() => m.textContent = '', 2600);
+}
+
+$('#btnAdd').onclick = () => {
+  const a = parseInt($('#inArr').value, 10), b = parseInt($('#inBur').value, 10);
+  if (!Number.isInteger(a) || a < 0 || !Number.isInteger(b) || b < 1){
+    showMsg('Llegada ≥ 0 y ráfaga ≥ 1 (enteros).', true); return;
+  }
+  const name = 'P' + (processes.length + 1);
+  processes.push({ name, arrival: a, burst: b });
+  renumber();
+  showMsg(`Proceso ${name} agregado — simulación reiniciada.`);
+  initSim();
+};
+$('#q0in').addEventListener('change', e => { q0v = Math.max(1, parseInt(e.target.value) || 2); e.target.value = q0v; initSim(); });
+$('#q1in').addEventListener('change', e => { q1v = Math.max(1, parseInt(e.target.value) || 4); e.target.value = q1v; initSim(); });
+$('#btnStep').onclick = () => { setAuto(false); stepForward(); };
+$('#btnBack').onclick = stepBack;
+$('#btnAuto').onclick = () => setAuto(!timer);
+$('#btnAll').onclick = runAll;
+$('#btnReset').onclick = initSim;
+$('#speed').onchange = () => { if (timer){ setAuto(false); setAuto(true); } };
+$('#btnTheme').onclick = () => {
+  const d = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = d;
+  $('#btnTheme').textContent = d === 'dark' ? '☀️ Modo claro' : '🌙 Modo oscuro';
+};
+document.addEventListener('keydown', e => {
+  if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowRight' || e.key === ' '){ e.preventDefault(); setAuto(false); stepForward(); }
+  if (e.key === 'ArrowLeft'){ e.preventDefault(); stepBack(); }
+});
+
+renumber();
+initSim();
+</script>
+</body>
+</html>
